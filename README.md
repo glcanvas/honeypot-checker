@@ -1,6 +1,11 @@
-# HONEYPOT-CHECKER
+# HONEYPOT-CHECKER-CONTRACT
 
-honeypot checker contract address in bsc mainnet
-[0x18E1D9d91D4ad5D05eCE0122257A5F88FE8E3e33](https://bscscan.com/address/0x18E1D9d91D4ad5D05eCE0122257A5F88FE8E3e33)
+create an .env file according to the format of the .env.example file.
 
-run `npm install` inside each folder before doing anything.
+deploy 👇
+
+```shell
+npx hardhat run scripts/deploy.js --network [network]
+```
+
+If the network you want doesn't exist, add it to `hardhat.config.js`

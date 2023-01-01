@@ -7,14 +7,26 @@
 const hre = require("hardhat");
 
 async function main() {
-  const HoneypotChecker = await hre.ethers.getContractFactory(
-    "HoneypotChecker"
+  const TokenErc20Checker = await hre.ethers.getContractFactory(
+      "TokenErc20Checker"
   );
-  const honeypotChecker = await HoneypotChecker.deploy();
+  const checker = await TokenErc20Checker.deploy();
 
-  await honeypotChecker.deployed();
+  const checkerContract = await checker.deployed();
 
-  console.log("deployed contract");
+  console.log("deployed checker contract");
+  console.log("address: " + checkerContract.address);
+
+  const Proxy = await hre.ethers.getContractFactory(
+      "CheckerProxy"
+  );
+  const proxy = await Proxy.deploy();
+
+  const proxyContract = await proxy.deployed();
+
+  console.log("deployed proxy contract");
+  console.log("address: " + proxyContract.address);
+
 }
 
 // We recommend this pattern to be able to use async/await everywhere
