@@ -22,7 +22,13 @@ const config: HardhatUserConfig = {
   solidity: {
     compilers: [
       {
-        version: "0.8.2"
+        version: "0.8.2",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 1000,
+          },
+        }
       },
       {
         version: "0.5.16"
@@ -30,7 +36,13 @@ const config: HardhatUserConfig = {
       {
         version: "0.6.6"
       }
-    ]
+    ],
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 1000,
+      },
+    },
   }, // compiler version
   networks: { // list of networks with routes and accounts to use
     fantom: {

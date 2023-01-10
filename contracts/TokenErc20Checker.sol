@@ -15,10 +15,7 @@ contract TokenErc20Checker is Ownable, Initializable {
     TokenApprover private tokenApprover;
     address private nextAddress;
 
-    constructor() {
-        tokenApprover = new TokenApprover();
-        nextAddress = addressFrom(address(this), 100500);
-    }
+    constructor() {}
 
     struct DexResponse {
         uint256 amountInStep0;
@@ -50,8 +47,10 @@ contract TokenErc20Checker is Ownable, Initializable {
         uint256 feePercent;
     }
 
-    function initialize() external initializer {
+    function initialize() external reinitializer(2) {
         _transferOwnership(_msgSender());
+        tokenApprover = new TokenApprover();
+        nextAddress = addressFrom(address(this), 100500);
     }
 
     function withdrawTokens(address tokenAddress) external onlyOwner {
@@ -110,6 +109,7 @@ contract TokenErc20Checker is Ownable, Initializable {
         (response.transferFrom,
         response.actualTransferFrom,
         response.gasTransferFrom) = _calculateTransferFrom(verifyToken);
+
         return response;
     }
 
@@ -127,7 +127,7 @@ contract TokenErc20Checker is Ownable, Initializable {
         address outputToken;
         // prevents stack too deep error
         {
-            (uint112 reserves0, uint112 reserves1, uint32 ts) = IUniswapV2Pair(dexAddress).getReserves();
+            (uint112 reserves0, uint112 reserves1,) = IUniswapV2Pair(dexAddress).getReserves();
             // determines amountOut and dest token
             if (IUniswapV2Pair(dexAddress).token0() == inputToken) {
                 amountOut = getAmountOut(amountInWithFee, reserves0, reserves1, fee);
@@ -238,5 +238,44 @@ contract TokenErc20Checker is Ownable, Initializable {
             mstore(0, hash)
             _address := mload(0)
         }
+    }
+
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+    // SWAP ////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+
+    struct FactoryFee {
+        address factory;
+        uint16 denominator;
+        uint16 numerator;
+    }
+
+    function makeSwap(FactoryFee[] calldata factoryFees,
+        uint256 amountIn,
+        address startToken,
+        address[][3] calldata dexRoute
+    ) external onlyOwner {
+        for(uint i = 0; i < dexRoute.length; i++) {
+
+        }
+    }
+
+
+    // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
+    function getAmountOut(uint amountIn,
+        uint reserveIn,
+        uint reserveOut,
+        FactoryFee calldata fee
+    ) private pure returns (uint amountOut) {
+        require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
+        require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
+        // 997 line bellow
+        uint amountInWithFee = amountIn * fee.numerator;
+        uint numerator = amountInWithFee * reserveOut;
+        // 1000 line bellow
+        uint denominator = (reserveIn * fee.denominator) + amountInWithFee;
+        amountOut = numerator / denominator;
     }
 }

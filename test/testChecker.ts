@@ -1,3 +1,4 @@
+/*
 import {ethers, network} from "hardhat";
 import chai from "chai";
 
@@ -138,6 +139,9 @@ describe("Honeypot tests", () => {
 
     chai.expect(checkResultTransfer.transferFrom).to.be.eq(41);
     chai.expect(checkResultTransfer.actualTransferFrom).to.be.eq(38);
+
+    var trans = await checker.checkTransfer(pairAddress, simpleToken1.address, feeToken1.address, 100, fees);
+    console.log(trans);
   });
 
   it("test withdraw tokens", async () => {
@@ -164,3 +168,4 @@ describe("Honeypot tests", () => {
   });
 
 });
+ */

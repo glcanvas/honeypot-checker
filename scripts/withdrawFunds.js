@@ -10,22 +10,11 @@ async function main() {
   const TokenErc20Checker = await hre.ethers.getContractFactory(
       "TokenErc20Checker"
   );
-  const checker = await TokenErc20Checker.deploy();
-
-  const checkerContract = await checker.deployed();
-
-  console.log("deployed checker contract");
-  console.log("address: " + checkerContract.address);
-
-  const Proxy = await hre.ethers.getContractFactory(
-      "CheckerProxy"
-  );
-  const proxy = await Proxy.deploy(checkerContract.address);
-
-  const proxyContract = await proxy.deployed();
-
-  console.log("deployed proxy contract");
-  console.log("address: " + proxyContract.address);
+  const checkerContract = await TokenErc20Checker.attach(
+      "0x340fDcD8Ca0196D40D62FA7D5d94bDFCd29C2044");
+  const trans = await checkerContract.withdrawTokens(
+      "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83");
+  console.log(trans);
 
 }
 

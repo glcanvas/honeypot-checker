@@ -20,12 +20,10 @@ async function main() {
   const Proxy = await hre.ethers.getContractFactory(
       "CheckerProxy"
   );
-  const proxy = await Proxy.deploy(checkerContract.address);
-
-  const proxyContract = await proxy.deployed();
-
-  console.log("deployed proxy contract");
-  console.log("address: " + proxyContract.address);
+  const proxy = await Proxy.attach(
+      "0xaBFD3e0C0661a4193B5912401d16Ae4d31E87f07");
+  const transaction = await proxy.changeImplementation(checkerContract.address);
+  console.log(transaction);
 
 }
 
