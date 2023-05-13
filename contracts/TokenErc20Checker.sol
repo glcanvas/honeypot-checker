@@ -5,52 +5,72 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import "./TokenApprover.sol";
 
-contract TokenErc20Checker is Ownable, Initializable {
-
-    uint256 immutable MAX_INT = 2 ** 256 - 1;
-    uint256 immutable ONE_HUNDRED = 100;
-
-    TokenApprover private tokenApprover;
-    address private nextAddress;
-
-    constructor() {}
-
-    struct DexResponse {
-        uint256 amountInStep0;
-        uint256 amountInWithFeeStep0;
-        uint256 expectedAmountOutStep0;
-        uint256 actualAmountOutStep0;
-        uint256 gasStep0;
-
-        uint256 amountInStep1;
-        uint256 amountInWithFeeStep1;
-        uint256 expectedAmountOutStep1;
-        uint256 actualAmountOutStep1;
-        uint256 gasStep1;
+interface Checker {
+    struct DexReport {
+        uint256 amountIn;
+        uint256 amountInWithFee;
+        uint256 expectedAmountOut;
+        uint256 actualAmountOut;
+        uint256 gas;
     }
 
-    struct TransferResponse {
+    struct ApproveReport {
+        uint256 gas;
+    }
+
+    struct TransferReport {
         uint256 transfer;
         uint256 actualTransfer;
-        uint256 gasTransfer;
-
-        uint256 transferFrom;
-        uint256 actualTransferFrom;
-        uint256 gasTransferFrom;
+        uint256 gas;
     }
 
-    struct FeeComponent {
-        uint256 numerator;
-        uint256 denominator;
-        uint256 feePercent;
+    struct Report {
+        DexReport exchangeTo; // from verified token, to shitcoin
+        DexReport exchangeFrom; // from shitcoin to verified token
+        TransferReport transfer; // use transfer function
+        ApproveReport approve; // calculate approve function
+        TransferReport transferFrom; // use transferFrom function
+    }
+}
+
+contract Bob is Ownable, Checker {
+    uint256 immutable MAX_INT = 2 ** 256 - 1;
+
+    function approveForOwner(address token) public onlyOwner returns (ApproveReport memory report) {
+        uint usedGas = gasleft();
+        IERC20(token).approve(owner(), MAX_INT);
+        usedGas = usedGas - gasleft();
+        return ApproveReport(usedGas);
+    }
+}
+
+contract TokenErc20Checker is Ownable, Initializable, Checker {
+    struct DexFee {
+        uint16 denominator;
+        uint16 numerator;
     }
 
-    function initialize() external reinitializer(2) {
+    struct SingleDexRequest {
+        address fromToken;
+        address[] dexPath;
+        DexFee[] dexFee;
+        uint256 feeSlippage;
+    }
+
+    uint256 immutable ONE_HUNDRED = 100;
+    Bob private bob;
+    bytes4 private constant VALIDATE_DEX_SELECTOR = bytes4(keccak256(bytes('validateDex(address,(address,address[],(uint256,uint256)[],uint256))')));
+    bytes4 private constant VALIDATE_DEX_INTERNAL_SELECTOR = bytes4(keccak256(bytes('validateDexInternal(address,(address,address[],(uint256,uint256)[],uint256))')));
+
+    constructor() {
         _transferOwnership(_msgSender());
-        tokenApprover = new TokenApprover();
-        nextAddress = addressFrom(address(this), 100500);
+        bob = new Bob();
+    }
+
+    function initialize() external reinitializer(4) {
+        _transferOwnership(_msgSender());
+        bob = new Bob();
     }
 
     function withdrawTokens(address tokenAddress) external onlyOwner {
@@ -59,98 +79,105 @@ contract TokenErc20Checker is Ownable, Initializable {
         safeTransfer(tokenAddress, owner(), contractBalance);
     }
 
-    function checkDex(address dexAddress,
-        address inputToken,
-        address verifyToken,
-        uint256 amountIn,
-        FeeComponent calldata fees) external onlyOwner returns (DexResponse memory) {
-        require(fees.feePercent < ONE_HUNDRED, "Huge percent");
-        IUniswapV2Pair dex = IUniswapV2Pair(dexAddress);
-        (address token0, address token1) = sortTokens(inputToken, verifyToken);
-        // gas savings
-        require(dex.token0() == token0, "Token 0 different");
-        require(dex.token1() == token1, "Token 1 different");
+    function checkDexesMulticall(SingleDexRequest[] calldata request) external returns (bytes[] memory reports) {
+        reports = new bytes[](request.length);
 
-        DexResponse memory response = DexResponse(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        (response.amountInStep0,
-        response.amountInWithFeeStep0,
-        response.expectedAmountOutStep0,
-        response.actualAmountOutStep0,
-        response.gasStep0) = _calculateSwapStat(dexAddress, inputToken, amountIn, fees);
+        address initializer = msg.sender;
+        for (uint256 i = 0; i < request.length; i++) {
+            require(request[i].dexFee.length == request[i].dexPath.length, "Incorrect fee & path");
+            (bool success, bytes memory data) = address(this).call(abi.encodeWithSelector(VALIDATE_DEX_SELECTOR, initializer, request[i]));
+            require(!success, "Can't be passed");
 
-        (response.amountInStep1,
-        response.amountInWithFeeStep1,
-        response.expectedAmountOutStep1,
-        response.actualAmountOutStep1,
-        response.gasStep1) = _calculateSwapStat(dexAddress, verifyToken, response.actualAmountOutStep0, fees);
-        return response;
+            reports[i] = data; // abi.decode(data, (string));
+        }
+
+        return reports;
     }
 
-    function checkTransfer(address dexAddress,
-        address inputToken,
-        address verifyToken,
-        uint256 amountIn,
-        FeeComponent calldata fees) external onlyOwner returns (TransferResponse memory) {
-        require(fees.feePercent < ONE_HUNDRED, "Huge percent");
-        IUniswapV2Pair dex = IUniswapV2Pair(dexAddress);
-        (address token0, address token1) = sortTokens(inputToken, verifyToken);
-        // gas savings
-        require(dex.token0() == token0, "Token 0 different");
-        require(dex.token1() == token1, "Token 1 different");
-
-        TransferResponse memory response = TransferResponse(0, 0, 0, 0, 0, 0);
-        // we need a bit of verify tokens
-        _calculateSwapStat(dexAddress, inputToken, amountIn, fees);
-
-        (response.transfer,
-        response.actualTransfer,
-        response.gasTransfer) = _calculateTransfer(verifyToken);
-
-        (response.transferFrom,
-        response.actualTransferFrom,
-        response.gasTransferFrom) = _calculateTransferFrom(verifyToken);
-
-        return response;
+    function validateDex(address initializer, SingleDexRequest calldata route) external returns(Report memory) {
+        // require(msg.sender == address(this), "Only recursive");
+        require(route.feeSlippage < ONE_HUNDRED, "Huge slippage");
+        (bool success, bytes memory data) = address(this).call(abi.encodeWithSelector(VALIDATE_DEX_INTERNAL_SELECTOR, initializer, route));
+        Report memory result;
+        if (success) {
+            result = abi.decode(data, (Report));
+        } else {
+            revert();
+            result = Report(DexReport(0, 0, 0, 0, 0), DexReport(0, 0, 0, 0, 0), TransferReport(0, 0, 0), ApproveReport(0), TransferReport(0, 0, 0));
+        }
+        //string memory msg = string(result);
+        return result;
+        //require(false, msg);
     }
 
-    function _calculateSwapStat(address dexAddress,
-        address inputToken,
-        uint256 amountIn,
-        FeeComponent calldata fee
-    ) private returns (uint256, uint256, uint256, uint256, uint256){
+    function validateDexInternal(address initializer, SingleDexRequest calldata route) external returns (Report memory) {
+        //require(msg.sender == address(this), "Only recursive");
+        require(route.feeSlippage < ONE_HUNDRED, "Huge slippage");
 
-        // amountIn will be sent to THE DEX
-        // amountInWithFee will be used to exchange
-        uint256 amountInWithFee = amountIn * (ONE_HUNDRED - fee.feePercent) / ONE_HUNDRED;
+        address initialToken = route.fromToken;
+        uint256 balance = min(IERC20(initialToken).allowance(initializer, address(this)), IERC20(initialToken).balanceOf(initializer));
+        require(balance > 0, "Not enough approve");
+        IERC20(initialToken).transferFrom(initializer, address(this), balance);
+
+        DexReport memory forwardSwapReport;
+        for (uint i = 0; i < route.dexPath.length; i++) {
+            // we got last report
+            forwardSwapReport = makeTrade(initialToken, route.dexPath[i], route.dexFee[i], route.feeSlippage);
+            IUniswapV2Pair pair = IUniswapV2Pair(route.dexPath[i]);
+            initialToken = pair.token0() == initialToken ? pair.token1() : pair.token0();
+        }
+        // initial token here == token we want validate
+        // this address owns tokens
+
+        TransferReport memory transferReport = makeTransfer(initialToken);
+        ApproveReport memory approveReport = makeApprove(initialToken);
+        TransferReport memory transferFromReport = makeTransferFrom(initialToken);
+        DexReport memory backwardSwapReport = makeTrade(initialToken,
+            route.dexPath[route.dexPath.length - 1],
+            route.dexFee[route.dexFee.length - 1],
+            route.feeSlippage);
+
+        Report memory report = Report(forwardSwapReport, backwardSwapReport, transferReport, approveReport, transferFromReport);
+        return report;
+    }
+
+
+    function makeTrade(address inputToken, address dex, DexFee memory fee, uint256 slippage) private returns (DexReport memory result) {
+        // x
+        uint256 balance = IERC20(inputToken).balanceOf(address(this));
+        // x * 97 / 100 (for example)
+        uint256 balanceWithSlippage = balance * (100 - slippage) / ONE_HUNDRED;
 
         uint amountOut;
         address outputToken;
         // prevents stack too deep error
         {
-            (uint112 reserves0, uint112 reserves1,) = IUniswapV2Pair(dexAddress).getReserves();
+            (uint112 reserves0, uint112 reserves1,) = IUniswapV2Pair(dex).getReserves();
             // determines amountOut and dest token
-            if (IUniswapV2Pair(dexAddress).token0() == inputToken) {
-                amountOut = getAmountOut(amountInWithFee, reserves0, reserves1, fee);
-                outputToken = IUniswapV2Pair(dexAddress).token1();
+            if (IUniswapV2Pair(dex).token0() == inputToken) {
+                amountOut = getAmountOut(balanceWithSlippage, reserves0, reserves1, fee);
+                outputToken = IUniswapV2Pair(dex).token1();
             } else {
-                amountOut = getAmountOut(amountInWithFee, reserves1, reserves0, fee);
-                outputToken = IUniswapV2Pair(dexAddress).token0();
+                amountOut = getAmountOut(balanceWithSlippage, reserves1, reserves0, fee);
+                outputToken = IUniswapV2Pair(dex).token0();
             }
         }
 
-        // buy stage!
-        safeTransfer(inputToken, dexAddress, amountIn);
+        // A bit more tokens transferred to dex, but passed only balanceWithSlippage
+        // we compare new balance with desired amount => outputToken
+
+        // buy stage
+        safeTransfer(inputToken, dex, balance);
 
         // determines output tokens before swap
         uint256 actualAmountOut = IERC20(outputToken).balanceOf(address(this));
-
         // make swap, records gas
         uint usedGas = gasleft();
 
         // prevents stack too deep
         {
-            (uint amount0Out, uint amount1Out) = inputToken == IUniswapV2Pair(dexAddress).token0() ? (uint(0), amountOut) : (amountOut, uint(0));
-            IUniswapV2Pair(dexAddress).swap(amount0Out, amount1Out, address(this), new bytes(0));
+            (uint amount0Out, uint amount1Out) = inputToken == IUniswapV2Pair(dex).token0() ? (uint(0), amountOut) : (amountOut, uint(0));
+            IUniswapV2Pair(dex).swap(amount0Out, amount1Out, address(this), new bytes(0));
         }
         // figure out how many gas has been spent
         usedGas = usedGas - gasleft();
@@ -158,27 +185,39 @@ contract TokenErc20Checker is Ownable, Initializable {
         // no safe math needed due to compile version above 0.8
         actualAmountOut = IERC20(outputToken).balanceOf(address(this)) - actualAmountOut;
 
-        return (amountIn, amountInWithFee, amountOut, actualAmountOut, usedGas);
+        result = DexReport(balance, balanceWithSlippage, amountOut, actualAmountOut, usedGas);
     }
 
-    function _calculateTransfer(address inputToken) private returns (uint256, uint256, uint256){
-        uint256 balanceBefore = IERC20(inputToken).balanceOf(address(this));
+    function makeTransfer(address token) private returns (TransferReport memory report) {
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        require(balance > 0, "Empty account");
+
+        uint balanceBefore = IERC20(token).balanceOf(address(bob));
+
         uint usedGas = gasleft();
-        safeTransfer(inputToken, address(tokenApprover), balanceBefore);
+        IERC20(token).transfer(address(bob), balance);
         usedGas = usedGas - gasleft();
-        uint256 balanceAfter = IERC20(inputToken).balanceOf(address(tokenApprover));
-        return (balanceBefore, balanceAfter, usedGas);
+
+        uint balanceAfter = IERC20(token).balanceOf(address(bob));
+
+        report = TransferReport(balance, balanceAfter - balanceBefore, usedGas);
     }
 
-    function _calculateTransferFrom(address inputToken) private returns (uint256, uint256, uint256){
-        address approverAddress = address(tokenApprover);
-        uint256 balanceBefore = IERC20(inputToken).balanceOf(approverAddress);
-        tokenApprover.giveApprove(inputToken, balanceBefore);
+    function makeApprove(address token) private returns (ApproveReport memory report) {
+        return bob.approveForOwner(token);
+    }
+
+    function makeTransferFrom(address token) private returns (TransferReport memory report) {
+        uint balanceBefore = IERC20(token).balanceOf(address(this));
+
+        uint balance = IERC20(token).balanceOf(address(bob));
         uint usedGas = gasleft();
-        safeTransferFrom(inputToken, approverAddress, nextAddress, balanceBefore);
+        IERC20(token).transferFrom(address(bob), address(this), balance);
         usedGas = usedGas - gasleft();
-        uint256 balanceAfter = IERC20(inputToken).balanceOf(nextAddress);
-        return (balanceBefore, balanceAfter, usedGas);
+
+        uint balanceAfter = IERC20(token).balanceOf(address(this));
+
+        return TransferReport(balance, balanceAfter - balanceBefore, usedGas);
     }
 
     function sortTokens(address tokenA, address tokenB) private pure returns (address token0, address token1) {
@@ -187,14 +226,11 @@ contract TokenErc20Checker is Ownable, Initializable {
         require(token0 != address(0), 'UniswapV2Library: ZERO_ADDRESS');
     }
 
-    // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
     function getAmountOut(uint amountIn,
         uint reserveIn,
         uint reserveOut,
-    // numerator is 997
-    // denominator is 1000
-        FeeComponent calldata fee
-    ) private pure returns (uint amountOut) {
+        DexFee memory fee
+    ) public pure returns (uint amountOut) {
         require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
         require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
         // 997 line bellow
@@ -225,57 +261,8 @@ contract TokenErc20Checker is Ownable, Initializable {
         );
     }
 
-    function addressFrom(address _origin, uint _nonce) private pure returns (address _address) {
-        bytes memory data;
-        if (_nonce == 0x00) data = abi.encodePacked(bytes1(0xd6), bytes1(0x94), _origin, bytes1(0x80));
-        else if (_nonce <= 0x7f) data = abi.encodePacked(bytes1(0xd6), bytes1(0x94), _origin, uint8(_nonce));
-        else if (_nonce <= 0xff) data = abi.encodePacked(bytes1(0xd7), bytes1(0x94), _origin, bytes1(0x81), uint8(_nonce));
-        else if (_nonce <= 0xffff) data = abi.encodePacked(bytes1(0xd8), bytes1(0x94), _origin, bytes1(0x82), uint16(_nonce));
-        else if (_nonce <= 0xffffff) data = abi.encodePacked(bytes1(0xd9), bytes1(0x94), _origin, bytes1(0x83), uint24(_nonce));
-        else data = abi.encodePacked(bytes1(0xda), bytes1(0x94), _origin, bytes1(0x84), uint32(_nonce));
-        bytes32 hash = keccak256(data);
-        assembly {
-            mstore(0, hash)
-            _address := mload(0)
-        }
+    function min(uint256 a, uint256 b) private pure returns (uint256) {
+        return a < b ? a : b;
     }
 
-    ////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////
-    // SWAP ////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////
-
-    struct FactoryFee {
-        address factory;
-        uint16 denominator;
-        uint16 numerator;
-    }
-
-    function makeSwap(FactoryFee[] calldata factoryFees,
-        uint256 amountIn,
-        address startToken,
-        address[][3] calldata dexRoute
-    ) external onlyOwner {
-        for(uint i = 0; i < dexRoute.length; i++) {
-
-        }
-    }
-
-
-    // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
-    function getAmountOut(uint amountIn,
-        uint reserveIn,
-        uint reserveOut,
-        FactoryFee calldata fee
-    ) private pure returns (uint amountOut) {
-        require(amountIn > 0, 'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT');
-        require(reserveIn > 0 && reserveOut > 0, 'UniswapV2Library: INSUFFICIENT_LIQUIDITY');
-        // 997 line bellow
-        uint amountInWithFee = amountIn * fee.numerator;
-        uint numerator = amountInWithFee * reserveOut;
-        // 1000 line bellow
-        uint denominator = (reserveIn * fee.denominator) + amountInWithFee;
-        amountOut = numerator / denominator;
-    }
 }

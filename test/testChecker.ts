@@ -1,4 +1,3 @@
-/*
 import {ethers, network} from "hardhat";
 import chai from "chai";
 
@@ -70,6 +69,7 @@ async function init(): Promise<[UniswapV2Factory, UniswapV2Router01, SimpleToken
 
 describe("Honeypot tests", () => {
 
+
   it("test pair no tokens fee", async () => {
     const [owner, ...addresses] = await ethers.getSigners();
     const [factory, router, simpleToken1, simpleToken2, feeToken1, feeToken2, checker] = await init();
@@ -85,63 +85,61 @@ describe("Honeypot tests", () => {
     await chai.expect(transaction).to.emit(pair, "Mint").withArgs(router.address, 10_000, 10_000);
     chai.expect(await pair.balanceOf(owner.address)).to.be.eq(9_000);
 
-    await simpleToken1.transfer(checker.address, 1_000);
-    var fees = {numerator: 997, denominator: 1000, feePercent: 0};
-    var checkResult = await checker.callStatic.checkDex(pairAddress, simpleToken1.address, simpleToken2.address, 100, fees);
-    chai.expect(checkResult.amountInStep0).to.be.eq(100);
-    chai.expect(checkResult.expectedAmountOutStep0).to.be.eq(98);
-    chai.expect(checkResult.actualAmountOutStep0).to.be.eq(98);
+    await simpleToken1.approve(checker.address, 1_000);
 
-    chai.expect(checkResult.amountInStep1).to.be.eq(98);
-    chai.expect(checkResult.expectedAmountOutStep1).to.be.eq(98);
-    chai.expect(checkResult.actualAmountOutStep1).to.be.eq(98);
+    var checkResult = await checker.callStatic.validateDex(owner.address, {
+      fromToken: simpleToken1.address,
+      dexPath: [pairAddress],
+      dexFee: [{numerator: 997, denominator: 1000}],
+      feeSlippage: 20
+    });
+    console.log("!!" + checkResult.length + " " + checkResult);
+    for (let i = 0; i < checkResult.length; i++) {
+      //console.log(checkResult.charCodeAt(i));
+    }
 
+    /*
+    chai.expect(checkResult.approve.gas).to.be.not.eq(0);
+    chai.expect(checkResult.exchangeTo.expectedAmountOut.toNumber()).to.be.eq(checkResult.exchangeTo.actualAmountOut.toNumber());
 
-    var checkResultTransfer = await checker.callStatic.checkTransfer(pairAddress, simpleToken1.address, simpleToken2.address, 100, fees);
-    chai.expect(checkResultTransfer.transfer).to.be.eq(98);
-    chai.expect(checkResultTransfer.actualTransfer).to.be.eq(98);
+    var checkResult = await checker.callStatic.checkDexesMulticall([{
+      fromToken: simpleToken1.address,
+      dexPath: [pairAddress],
+      dexFee: [{numerator: 997, denominator: 1000}],
+      feeSlippage: 20
+    }]);
+     */
 
-    chai.expect(checkResultTransfer.transferFrom).to.be.eq(98);
-    chai.expect(checkResultTransfer.actualTransferFrom).to.be.eq(98);
+    console.log(checkResult);
   });
 
-  it("test pair with tokens fee", async () => {
+  /*
+  it("test pair tokens with fee", async () => {
     const [owner, ...addresses] = await ethers.getSigners();
     const [factory, router, simpleToken1, simpleToken2, feeToken1, feeToken2, checker] = await init();
 
-    await factory.createPair(simpleToken1.address, feeToken1.address);
-    const pairAddress = await factory.getPair(simpleToken1.address, feeToken1.address);
+    await factory.createPair(simpleToken1.address, feeToken2.address);
+    const pairAddress = await factory.getPair(simpleToken1.address, feeToken2.address);
     const pair = (await ethers.getContractFactory("UniswapV2Pair")).attach(pairAddress);
 
     await simpleToken1.approve(router.address, 100_000);
-    await feeToken1.approve(router.address, 100_000);
+    await feeToken2.approve(router.address, 100_000);
     var transaction = router.addLiquidity(simpleToken1.address,
-        feeToken1.address, 10_000, 10_000, 0, 0, owner.address);
-    await chai.expect(transaction).to.emit(pair, "Mint").withArgs(router.address, 9_500, 10_000);
+        feeToken2.address, 10_000, 10_000, 0, 0, owner.address);
     chai.expect(await pair.balanceOf(owner.address)).to.be.eq(8746);
 
-    await simpleToken1.transfer(checker.address, 1_000);
-    var fees = {numerator: 997, denominator: 1000, feePercent: 50};
-    var checkResult = await checker.callStatic.checkDex(pairAddress, simpleToken1.address, feeToken1.address, 100, fees);
-    chai.expect(checkResult.amountInStep0).to.be.eq(100);
-    chai.expect(checkResult.amountInWithFeeStep0).to.be.eq(50);
-    chai.expect(checkResult.expectedAmountOutStep0).to.be.eq(47);
-    chai.expect(checkResult.actualAmountOutStep0).to.be.eq(44);
+    await simpleToken1.approve(checker.address, 1_000);
+    var checkResult = await checker.callStatic.validateDex(owner.address, {
+      fromToken: simpleToken1.address,
+      dexPath: [pairAddress],
+      dexFee: [{numerator: 997, denominator: 1000}],
+      feeSlippage: 20
+    });
 
-    chai.expect(checkResult.amountInStep1).to.be.eq(44);
-    chai.expect(checkResult.amountInWithFeeStep1).to.be.eq(22);
-    chai.expect(checkResult.expectedAmountOutStep1).to.be.eq(23);
-    chai.expect(checkResult.actualAmountOutStep1).to.be.eq(23);
+    console.log(checkResult);
 
-    var checkResultTransfer = await checker.callStatic.checkTransfer(pairAddress, simpleToken1.address, feeToken1.address, 100, fees);
-    chai.expect(checkResultTransfer.transfer).to.be.eq(44);
-    chai.expect(checkResultTransfer.actualTransfer).to.be.eq(41);
-
-    chai.expect(checkResultTransfer.transferFrom).to.be.eq(41);
-    chai.expect(checkResultTransfer.actualTransferFrom).to.be.eq(38);
-
-    var trans = await checker.checkTransfer(pairAddress, simpleToken1.address, feeToken1.address, 100, fees);
-    console.log(trans);
+    chai.expect(checkResult.approve.gas).to.be.not.eq(0);
+    chai.expect(checkResult.exchangeTo.expectedAmountOut.toNumber()).to.be.greaterThan(checkResult.exchangeTo.actualAmountOut.toNumber());
   });
 
   it("test withdraw tokens", async () => {
@@ -167,5 +165,5 @@ describe("Honeypot tests", () => {
 
   });
 
+   */
 });
- */

@@ -81,6 +81,7 @@ describe("Arbitrage tests", () => {
       {"dex": CA.address, "index": BigNumber.from(0), "firstIdentifier": C.address < A.address}
     ]
     ]);
+    console.log(trans);
     console.log((await trans.wait(1)).gasUsed);
     const balanceAfter = await A.balanceOf(SW.address);
     console.log(balanceAfter);
