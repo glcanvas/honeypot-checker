@@ -87,33 +87,19 @@ describe("Honeypot tests", () => {
 
     await simpleToken1.approve(checker.address, 1_000);
 
-    var checkResult = await checker.callStatic.validateDex(owner.address, {
-      fromToken: simpleToken1.address,
-      dexPath: [pairAddress],
-      dexFee: [{numerator: 997, denominator: 1000}],
-      feeSlippage: 20
-    });
-    console.log("!!" + checkResult.length + " " + checkResult);
-    for (let i = 0; i < checkResult.length; i++) {
-      //console.log(checkResult.charCodeAt(i));
-    }
-
-    /*
-    chai.expect(checkResult.approve.gas).to.be.not.eq(0);
-    chai.expect(checkResult.exchangeTo.expectedAmountOut.toNumber()).to.be.eq(checkResult.exchangeTo.actualAmountOut.toNumber());
-
     var checkResult = await checker.callStatic.checkDexesMulticall([{
       fromToken: simpleToken1.address,
       dexPath: [pairAddress],
       dexFee: [{numerator: 997, denominator: 1000}],
       feeSlippage: 20
     }]);
-     */
 
     console.log(checkResult);
+
+    chai.expect(checkResult[0].approve.gas.toNumber()).is.lessThanOrEqual(50_000);
   });
 
-  /*
+
   it("test pair tokens with fee", async () => {
     const [owner, ...addresses] = await ethers.getSigners();
     const [factory, router, simpleToken1, simpleToken2, feeToken1, feeToken2, checker] = await init();
@@ -129,17 +115,17 @@ describe("Honeypot tests", () => {
     chai.expect(await pair.balanceOf(owner.address)).to.be.eq(8746);
 
     await simpleToken1.approve(checker.address, 1_000);
-    var checkResult = await checker.callStatic.validateDex(owner.address, {
+    var checkResult = await checker.callStatic.checkDexesMulticall([{
       fromToken: simpleToken1.address,
       dexPath: [pairAddress],
       dexFee: [{numerator: 997, denominator: 1000}],
       feeSlippage: 20
-    });
+    }]);
 
     console.log(checkResult);
 
-    chai.expect(checkResult.approve.gas).to.be.not.eq(0);
-    chai.expect(checkResult.exchangeTo.expectedAmountOut.toNumber()).to.be.greaterThan(checkResult.exchangeTo.actualAmountOut.toNumber());
+    chai.expect(checkResult[0].approve.gas).to.be.not.eq(0);
+    chai.expect(checkResult[0].exchangeTo.expectedAmountOut.toNumber()).to.be.greaterThan(checkResult[0].exchangeTo.actualAmountOut.toNumber());
   });
 
   it("test withdraw tokens", async () => {
@@ -165,5 +151,5 @@ describe("Honeypot tests", () => {
 
   });
 
-   */
+
 });

@@ -46,6 +46,7 @@ contract Bob is Ownable, Checker {
 }
 
 contract TokenErc20Checker is Ownable, Initializable, Checker {
+
     struct DexFee {
         uint16 denominator;
         uint16 numerator;
@@ -60,15 +61,16 @@ contract TokenErc20Checker is Ownable, Initializable, Checker {
 
     uint256 immutable ONE_HUNDRED = 100;
     Bob private bob;
-    bytes4 private constant VALIDATE_DEX_SELECTOR = bytes4(keccak256(bytes('validateDex(address,(address,address[],(uint256,uint256)[],uint256))')));
-    bytes4 private constant VALIDATE_DEX_INTERNAL_SELECTOR = bytes4(keccak256(bytes('validateDexInternal(address,(address,address[],(uint256,uint256)[],uint256))')));
+    bytes4 private constant VALIDATE_DEX_SELECTOR = bytes4(keccak256(bytes('validateDex(address,(address,address[],(uint16,uint16)[],uint256))')));
+    bytes4 private constant VALIDATE_DEX_INTERNAL_SELECTOR = bytes4(keccak256(bytes('validateDexInternal(address,(address,address[],(uint16,uint16)[],uint256))')));
 
     constructor() {
         _transferOwnership(_msgSender());
         bob = new Bob();
     }
 
-    function initialize() external reinitializer(4) {
+    function initialize() external // reinitializer(4)
+    {
         _transferOwnership(_msgSender());
         bob = new Bob();
     }
@@ -79,39 +81,43 @@ contract TokenErc20Checker is Ownable, Initializable, Checker {
         safeTransfer(tokenAddress, owner(), contractBalance);
     }
 
-    function checkDexesMulticall(SingleDexRequest[] calldata request) external returns (bytes[] memory reports) {
-        reports = new bytes[](request.length);
+    function checkDexesMulticall(SingleDexRequest[] calldata request) external returns (Report[] memory reports) {
+        reports = new Report[](request.length);
 
         address initializer = msg.sender;
         for (uint256 i = 0; i < request.length; i++) {
             require(request[i].dexFee.length == request[i].dexPath.length, "Incorrect fee & path");
-            (bool success, bytes memory data) = address(this).call(abi.encodeWithSelector(VALIDATE_DEX_SELECTOR, initializer, request[i]));
+            (bool success, bytes memory data) = address(this).call(abi.encodePacked(VALIDATE_DEX_SELECTOR, abi.encode(initializer, request[i])));
             require(!success, "Can't be passed");
 
-            reports[i] = data; // abi.decode(data, (string));
+            uint offset = 32 + 32 + 4;
+            bytes memory reportByte =  slice(data, offset, data.length - offset); //abi.decode(data, (string));
+
+            reports[i] = abi.decode(reportByte, (Report));
+
         }
+        // 00000000000000000000000000000000000000000000000000000000000003e8
 
         return reports;
     }
 
-    function validateDex(address initializer, SingleDexRequest calldata route) external returns(Report memory) {
-        // require(msg.sender == address(this), "Only recursive");
+    function validateDex(address initializer, SingleDexRequest memory route) external {
+        require(msg.sender == address(this), "Only recursive");
         require(route.feeSlippage < ONE_HUNDRED, "Huge slippage");
-        (bool success, bytes memory data) = address(this).call(abi.encodeWithSelector(VALIDATE_DEX_INTERNAL_SELECTOR, initializer, route));
+        (bool success, bytes memory data) = address(this).call(abi.encodePacked(VALIDATE_DEX_INTERNAL_SELECTOR, abi.encode(initializer, route)));
         Report memory result;
         if (success) {
             result = abi.decode(data, (Report));
         } else {
-            revert();
             result = Report(DexReport(0, 0, 0, 0, 0), DexReport(0, 0, 0, 0, 0), TransferReport(0, 0, 0), ApproveReport(0), TransferReport(0, 0, 0));
         }
-        //string memory msg = string(result);
-        return result;
-        //require(false, msg);
+        string memory msg = string(abi.encode(result));
+        revert(msg);
     }
 
-    function validateDexInternal(address initializer, SingleDexRequest calldata route) external returns (Report memory) {
-        //require(msg.sender == address(this), "Only recursive");
+    // 00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000003e8000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e2000000000000000000000000000000000000000000000000000000000001709b00000000000000000000000000000000000000000000000000000000000002e2000000000000000000000000000000000000000000000000000000000000024e000000000000000000000000000000000000000000000000000000000000029000000000000000000000000000000000000000000000000000000000000002900000000000000000000000000000000000000000000000000000000000009c9a00000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e20000000000000000000000000000000000000000000000000000000000005c6c000000000000000000000000000000000000000000000000000000000000631400000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e20000000000000000000000000000000000000000000000000000000000005e34
+    function validateDexInternal(address initializer, SingleDexRequest memory route) external returns (Report memory) {
+        require(msg.sender == address(this), "Only recursive");
         require(route.feeSlippage < ONE_HUNDRED, "Huge slippage");
 
         address initialToken = route.fromToken;
@@ -141,6 +147,7 @@ contract TokenErc20Checker is Ownable, Initializable, Checker {
         return report;
     }
 
+    // 000000000000000000000000000000000000000000000000000000000000003e8000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e2000000000000000000000000000000000000000000000000000000000001709b00000000000000000000000000000000000000000000000000000000000002e2000000000000000000000000000000000000000000000000000000000000024e000000000000000000000000000000000000000000000000000000000000029000000000000000000000000000000000000000000000000000000000000002900000000000000000000000000000000000000000000000000000000000009c9a00000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e20000000000000000000000000000000000000000000000000000000000005c6c000000000000000000000000000000000000000000000000000000000000631400000000000000000000000000000000000000000000000000000000000002e200000000000000000000000000000000000000000000000000000000000002e20000000000000000000000000000000000000000000000000000000000005e34
 
     function makeTrade(address inputToken, address dex, DexFee memory fee, uint256 slippage) private returns (DexReport memory result) {
         // x
@@ -263,6 +270,76 @@ contract TokenErc20Checker is Ownable, Initializable, Checker {
 
     function min(uint256 a, uint256 b) private pure returns (uint256) {
         return a < b ? a : b;
+    }
+
+
+    function slice(
+        bytes memory _bytes,
+        uint256 _start,
+        uint256 _length
+    )
+    internal
+    pure
+    returns (bytes memory)
+    {
+        require(_length + 31 >= _length, "slice_overflow");
+        require(_bytes.length >= _start + _length, "slice_outOfBounds");
+
+        bytes memory tempBytes;
+
+        assembly {
+            switch iszero(_length)
+            case 0 {
+            // Get a location of some free memory and store it in tempBytes as
+            // Solidity does for memory variables.
+                tempBytes := mload(0x40)
+
+            // The first word of the slice result is potentially a partial
+            // word read from the original array. To read it, we calculate
+            // the length of that partial word and start copying that many
+            // bytes into the array. The first word we copy will start with
+            // data we don't care about, but the last `lengthmod` bytes will
+            // land at the beginning of the contents of the new array. When
+            // we're done copying, we overwrite the full first word with
+            // the actual length of the slice.
+                let lengthmod := and(_length, 31)
+
+            // The multiplication in the next line is necessary
+            // because when slicing multiples of 32 bytes (lengthmod == 0)
+            // the following copy loop was copying the origin's length
+            // and then ending prematurely not copying everything it should.
+                let mc := add(add(tempBytes, lengthmod), mul(0x20, iszero(lengthmod)))
+                let end := add(mc, _length)
+
+                for {
+                // The multiplication in the next line has the same exact purpose
+                // as the one above.
+                    let cc := add(add(add(_bytes, lengthmod), mul(0x20, iszero(lengthmod))), _start)
+                } lt(mc, end) {
+                    mc := add(mc, 0x20)
+                    cc := add(cc, 0x20)
+                } {
+                    mstore(mc, mload(cc))
+                }
+
+                mstore(tempBytes, _length)
+
+            //update free-memory pointer
+            //allocating the array padded to 32 bytes like the compiler does now
+                mstore(0x40, and(add(mc, 31), not(31)))
+            }
+            //if we want a zero-length slice let's just return a zero-length array
+            default {
+                tempBytes := mload(0x40)
+            //zero out the 32 bytes slice we are about to return
+            //we need to do it because Solidity does not garbage collect
+                mstore(tempBytes, 0)
+
+                mstore(0x40, add(tempBytes, 0x20))
+            }
+        }
+
+        return tempBytes;
     }
 
 }
